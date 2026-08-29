@@ -1,8 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { MessageSquareText, SendHorizonal } from "lucide-react";
 import type { TranscriptLine } from "@/lib/types";
 import { api } from "@/lib/api";
-import { hhmm } from "@/lib/utils";
+import { hm } from "@/lib/utils";
+import { Avatar } from "./ui";
 
 export function Transcript({ incidentId, lines, me }: { incidentId: string; lines: TranscriptLine[]; me: { uid: string; name: string } | null }) {
   const [text, setText] = useState("");
@@ -11,19 +13,25 @@ export function Transcript({ incidentId, lines, me }: { incidentId: string; line
   const send = async () => { if (!text.trim() || !me) return; await api.transcript(incidentId, me.uid, text.trim()); setText(""); };
   return (
     <div className="panel flex h-full flex-col p-4">
-      <div className="mb-2 text-xs font-medium tracking-wider text-[var(--muted)]">ROOM TRANSCRIPT</div>
-      <div className="flex-1 space-y-1.5 overflow-y-auto pr-1 text-sm">
-        {lines.map((l) => (
-          <div key={l.id} className={`rounded-md px-2 py-1 ${l.uid === "sentinel" ? "border border-[var(--accent)]/40 bg-[#142033]" : ""}`}>
-            <span className="mr-2 font-mono text-[10px] text-[var(--muted)]">{hhmm(l.at)}</span>
-            <b className={l.uid === "sentinel" ? "text-[var(--accent)]" : ""}>{l.uid === "sentinel" ? "🤖 Sentinel" : l.name}</b>: {l.text}
-          </div>
-        ))}
+      <div className="ph"><MessageSquareText />Room transcript</div>
+      <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1 text-[13px]">
+        {lines.map((l) => {
+          const ai = l.uid === "sentinel";
+          return (
+            <div key={l.id} className={`flex items-start gap-2 ${ai ? "rounded-xl border border-[var(--blue)]/30 bg-[var(--blue)]/8 p-2" : ""}`}>
+              <Avatar uid={l.uid} name={l.name} size={24} className="mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2"><b className={ai ? "text-[var(--blue)]" : ""}>{l.name}</b><span className="mono text-[10px] text-[var(--dim)]">{hm(l.at)}</span></div>
+                <div className="leading-snug text-[var(--text)]/90">{l.text}</div>
+              </div>
+            </div>
+          );
+        })}
         <div ref={end} />
       </div>
       <form onSubmit={(e) => { e.preventDefault(); send(); }} className="mt-2 flex gap-2">
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={me ? `Speak as ${me.name} (typed fallback)…` : "Set your name first"} className="flex-1 rounded-md border border-[var(--border)] bg-[var(--panel-2)] px-3 py-1.5 text-sm" />
-        <button className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-black">Send</button>
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={me ? `Speak as ${me.name} (typed fallback)…` : "Set your name first"} className="input flex-1 text-[13px]" />
+        <button className="btn btn-primary"><SendHorizonal /></button>
       </form>
     </div>
   );
