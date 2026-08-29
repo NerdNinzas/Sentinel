@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+from zoneinfo import ZoneInfo
+
+from app.core.config import get_settings
 from app.engine import models as m
 from app.engine.confidence import spoken_summary
 from app.llm import client as llm
@@ -47,7 +50,8 @@ def _md(inc: m.Incident) -> str:
     rc = inc.confidence.root_cause
     L += ["## Root Cause", ("Root cause **not conclusively established** (confidence %.0f%%). " % (rc * 100)) if rc < 0.8 else f"Root cause confidence {rc:.0%}.", "",
           "## Confidence"] + [f"- {k.replace('_', ' ')}: {v:.0%}" for k, v in inc.confidence.model_dump().items()] + [""]
-    L += ["## Timeline"] + [f"- {e.at.strftime('%H:%M:%S')} {e.text}" for e in inc.timeline]
+    tz = ZoneInfo(get_settings().report_timezone)
+    L += [f"## Timeline ({get_settings().report_timezone})"] + [f"- {e.at.astimezone(tz).strftime('%H:%M:%S')} {e.text}" for e in inc.timeline]
     return "\n".join(L)
 
 

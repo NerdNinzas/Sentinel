@@ -38,6 +38,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./sentinel.db"
     demo_mode: bool = True
+    report_timezone: str = "Asia/Kolkata"
 
 
 @lru_cache

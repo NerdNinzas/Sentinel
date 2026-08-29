@@ -2,6 +2,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api } from "@/lib/api";
 
 export default function ReportPage({ params }: { params: Promise<{ id: string }> }) {
@@ -21,7 +22,7 @@ export default function ReportPage({ params }: { params: Promise<{ id: string }>
       </div>
       {err && <div className="text-[var(--red)]">{err}</div>}
       {!md && !err && <div className="text-[var(--muted)]">Generating report…</div>}
-      {md && <article className="panel prose-md p-6 text-sm"><ReactMarkdown>{md}</ReactMarkdown></article>}
+      {md && <article className="panel prose-md p-6 text-sm"><ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown></article>}
     </main>
   );
 }

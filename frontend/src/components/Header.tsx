@@ -21,7 +21,7 @@ export function Header({ inc, connected, right }: { inc: Incident; connected: bo
           <div className="text-xs text-[var(--muted)]">{inc.id} · channel {inc.channel}</div>
         </div>
         <span className="ml-2 font-mono text-lg tabular-nums">{dur}</span>
-        <span className={cn("chip flex items-center gap-1 border-transparent text-black", STATUS[inc.status])}>{inc.status}</span>
+        <span className={cn("chip flex items-center gap-1 border-transparent font-semibold", STATUS[inc.status])} style={{ color: "#000" }}>{inc.status}</span>
         {inc.status !== "resolved" && <span className="flex items-center gap-1 text-xs text-[var(--red)]"><span className="pulse inline-block h-2 w-2 rounded-full bg-[var(--red)]" />LIVE</span>}
       </div>
       <div className="flex items-center gap-2">
