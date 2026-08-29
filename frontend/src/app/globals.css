@@ -1,20 +1,64 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0b0f17; --panel: #121826; --panel-2: #171f30; --border: #1f2a3f;
-  --text: #e6edf7; --muted: #8b9bb4; --accent: #5b8cff; --red: #ff5c5c; --amber: #ffb84d; --green: #3ddc97; --purple: #b28dff;
+  --bg: #070a12; --bg-2: #0b1020; --panel: #0e1422; --panel-2: #141c2e; --panel-3: #1a2440; --border: #1e2a44; --border-2: #2a3a5c;
+  --text: #e8eefb; --muted: #8b9bb8; --dim: #5d6b87;
+  --red: #ff4d5e; --amber: #ffb020; --green: #2ee6a6; --blue: #4f8cff; --purple: #a78bfa; --cyan: #22d3ee;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
 }
 html, body { background: var(--bg); color: var(--text); }
-* { scrollbar-width: thin; scrollbar-color: #2a3650 transparent; }
-.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
-.chip { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+body {
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(79,140,255,.12), transparent 60%),
+    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+  background-size: 100% 100%, 32px 32px, 32px 32px;
+}
+* { scrollbar-width: thin; scrollbar-color: #253252 transparent; }
+.mono { font-family: var(--mono); }
+.panel { background: linear-gradient(180deg, rgba(255,255,255,.02), transparent 40%), var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 30px rgba(0,0,0,.35); }
+.ph { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.ph svg { width: 14px; height: 14px; color: var(--blue); }
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-2); color: var(--muted); background: rgba(255,255,255,.02); white-space: nowrap; }
+.chip svg { width: 11px; height: 11px; }
+.chip-red { color: var(--red); border-color: rgba(255,77,94,.4); background: rgba(255,77,94,.08); }
+.chip-amber { color: var(--amber); border-color: rgba(255,176,32,.4); background: rgba(255,176,32,.08); }
+.chip-green { color: var(--green); border-color: rgba(46,230,166,.4); background: rgba(46,230,166,.08); }
+.chip-blue { color: var(--blue); border-color: rgba(79,140,255,.4); background: rgba(79,140,255,.1); }
+.chip-purple { color: var(--purple); border-color: rgba(167,139,250,.4); background: rgba(167,139,250,.1); }
+.btn { display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 500; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text); transition: all .15s; white-space: nowrap; }
+.btn:hover { background: var(--panel-3); border-color: #34497a; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn svg { width: 15px; height: 15px; }
+.btn-primary { background: var(--blue); border-color: var(--blue); color: #061024; }
+.btn-primary:hover { background: #6b9dff; }
+.btn-danger { background: var(--red); border-color: var(--red); color: #1a0508; }
+.btn-danger:hover { background: #ff6b79; }
+.btn-success { background: var(--green); border-color: var(--green); color: #04261a; }
+.btn-success:hover { background: #55f0ba; }
+.btn-ghost { background: transparent; }
+.input { border-radius: 10px; border: 1px solid var(--border-2); background: var(--bg-2); padding: 8px 12px; color: var(--text); font-size: 14px; outline: none; }
+.input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(79,140,255,.15); }
+select.input { appearance: none; }
 .pulse { animation: pulse 1.6s ease-in-out infinite; }
-@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
-.prose-md h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 .5rem }
-.prose-md h2 { font-size: 1.1rem; font-weight: 600; margin: 1.25rem 0 .4rem; color: #c9d6ee }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .3 } }
+.glow-red { box-shadow: 0 0 0 1px rgba(255,77,94,.5), 0 0 24px rgba(255,77,94,.35); }
+.glow-blue { box-shadow: 0 0 0 1px rgba(79,140,255,.35), 0 0 30px rgba(79,140,255,.2); }
+.rail::before { content: ""; position: absolute; left: 95px; top: 0; bottom: 0; width: 1px; background: linear-gradient(var(--border-2), var(--border)); }
+.wave span { display: inline-block; width: 3px; margin: 0 1px; background: var(--green); border-radius: 2px; animation: wave 1s ease-in-out infinite; }
+.wave span:nth-child(2) { animation-delay: .15s } .wave span:nth-child(3) { animation-delay: .3s } .wave span:nth-child(4) { animation-delay: .45s }
+@keyframes wave { 0%,100% { height: 4px } 50% { height: 14px } }
+.scan { position: relative; overflow: hidden; }
+.scan::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent, rgba(79,140,255,.05), transparent); animation: scan 4s linear infinite; pointer-events: none; }
+@keyframes scan { from { transform: translateY(-100%) } to { transform: translateY(100%) } }
+.prose-md h1 { font-size: 1.6rem; font-weight: 700; margin: .5rem 0 .75rem; letter-spacing: -.01em }
+.prose-md h2 { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 .5rem; color: var(--blue); letter-spacing: .06em; text-transform: uppercase; font-size: .8rem }
 .prose-md ul { list-style: disc; padding-left: 1.2rem; margin: .3rem 0 }
 .prose-md ol { list-style: decimal; padding-left: 1.2rem; margin: .3rem 0 }
-.prose-md table { border-collapse: collapse; margin: .5rem 0; font-size: .85rem }
-.prose-md td, .prose-md th { border: 1px solid var(--border); padding: 4px 8px }
+.prose-md li { margin: .15rem 0 }
+.prose-md table { border-collapse: collapse; margin: .5rem 0; font-size: .85rem; width: 100% }
+.prose-md td, .prose-md th { border: 1px solid var(--border); padding: 5px 9px; text-align: left }
+.prose-md th { background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em }
 .prose-md p { margin: .35rem 0 }
 .prose-md strong { color: #fff }
+.prose-md code { font-family: var(--mono); font-size: .85em; background: var(--panel-2); padding: 1px 5px; border-radius: 4px }
