@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0b0f17; --panel: #121826; --panel-2: #171f30; --border: #1f2a3f;
+  --text: #e6edf7; --muted: #8b9bb4; --accent: #5b8cff; --red: #ff5c5c; --amber: #ffb84d; --green: #3ddc97; --purple: #b28dff;
+}
+html, body { background: var(--bg); color: var(--text); }
+* { scrollbar-width: thin; scrollbar-color: #2a3650 transparent; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+.chip { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.pulse { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+.prose-md h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 .5rem }
+.prose-md h2 { font-size: 1.1rem; font-weight: 600; margin: 1.25rem 0 .4rem; color: #c9d6ee }
+.prose-md ul { list-style: disc; padding-left: 1.2rem; margin: .3rem 0 }
+.prose-md ol { list-style: decimal; padding-left: 1.2rem; margin: .3rem 0 }
+.prose-md table { border-collapse: collapse; margin: .5rem 0; font-size: .85rem }
+.prose-md td, .prose-md th { border: 1px solid var(--border); padding: 4px 8px }
+.prose-md p { margin: .35rem 0 }
+.prose-md strong { color: #fff }
