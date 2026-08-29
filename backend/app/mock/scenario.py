@@ -21,7 +21,7 @@ STEPS: list[tuple[float, str, dict]] = [
     (5.0, "say", {"uid": "rahul", "text": "I think the database is overloaded. The payment service is timing out on every query."}),
     (5.0, "say", {"uid": "arjun", "text": "Rahul, check the database connection pool. Ananya, can you pull the infra dashboards?"}),
     (5.0, "say", {"uid": "ananya", "text": "Looking at it now. Database looks healthy from the node level, CPU is fine."}),
-    (6.0, "metrics", {"phase": "outage", "note": "📈 Monitoring: DB connection utilization = 100%, pool wait time 4.8s"}),
+    (6.0, "metrics", {"phase": "db_saturated", "note": "📈 Monitoring: DB connection utilization = 100%, pool wait time 4.8s"}),
     (4.0, "say", {"uid": "rahul", "text": "Connection pool is exhausted. Confirmed — every worker is waiting on a connection, pool wait time is almost five seconds."}),
     (6.0, "say", {"uid": "ananya", "text": "Fair, my check was CPU only. Pool exhaustion is real, connections are at 100%."}),
     (5.0, "say", {"uid": "arjun", "text": "Let's freeze all deployments until we understand this. Someone check what changed in the last hour."}),

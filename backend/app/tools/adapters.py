@@ -69,7 +69,7 @@ class Deploy:
     """Mock deployment controller. Rollback drives the mock monitoring to recovery."""
 
     async def rollback(self, inc: m.Incident, service: str, version: str | None) -> dict:
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(1.5 / monitoring.speed)
         asyncio.create_task(monitoring.recover_over(seconds=10))
         return {"summary": f"rolled back {service} {version or ''} → v4.1".replace("  ", " "), "service": service, "to": "v4.1"}
 

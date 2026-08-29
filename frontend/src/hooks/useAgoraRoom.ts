@@ -74,7 +74,8 @@ export function useAgoraRoom(incidentId: string) {
 
       // RTM: receive the agent's transcript stream with speaker uids
       try {
-        const { RTM } = await import("agora-rtm");
+        const mod: any = await import("agora-rtm");
+        const RTM = mod.RTM ?? mod.default?.RTM ?? mod.default;
         const rtm = new RTM(info.app_id, me.uid, info.tokens.rtm ? { token: info.tokens.rtm } : undefined);
         rtm.addEventListener("message", (ev: any) => {
           try {

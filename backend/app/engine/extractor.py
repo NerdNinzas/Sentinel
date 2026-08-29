@@ -145,24 +145,28 @@ class RuleExtractor:
                 if i >= 0:
                     body = text[i + len(c):]
                     break
-            body = _clean(body).lstrip(" ,that")
+            body = re.sub(r"^[\s,]*(that\s+)?", "", _clean(body))
+            body = re.split(r"(?<=[.!?])\s+", body)[0].rstrip(".!?")
             if body:
                 ops.append({"op": "add_hypothesis", "text": body[0].upper() + body[1:], "proposed_by": uid, "confidence": 0.35})
 
-        # -- actions -----------------------------------------------------------
-        target = _match_participant(inc, text, exclude=uid)
-        if target and re.search(rf"\b(can you|could you|please|go|,)\s*.*{ACTION_VERBS}", t) or (target and re.search(ACTION_VERBS, t) and t.startswith(inc.name_of(target).split()[0].lower())):
-            task = re.sub(rf"^.*?{ACTION_VERBS}\s*", "", text, flags=re.I)
-            ops.append({"op": "add_action", "text": f"Investigate {_clean(task)}", "owner": target,
-                        "priority": "critical" if "database" in t or "db" in t else "high", "created_by": uid})
-        elif re.search(rf"\b(someone|somebody|anyone|can we)\b.*{ACTION_VERBS}", t):
-            task = re.sub(rf"^.*?{ACTION_VERBS}\s*", "", text, flags=re.I)
-            ops.append({"op": "add_action", "text": f"Investigate {_clean(task)}", "owner": None, "priority": "high", "created_by": uid})
-            iv = iv or {"action": "ASK", "speech": f"That action has no owner yet: {_clean(task)}. Who is taking it?", "urgency": "medium"}
-        elif re.search(rf"\b(i'll|i will|let me|i'm on it|i can)\b.*{ACTION_VERBS}?", t) and not any(c in t for c in HYPOTHESIS_CUES):
-            task = re.sub(r"^.*?\b(i'll|i will|let me|i can)\s*", "", text, flags=re.I)
-            if len(task) > 6:
-                ops.append({"op": "add_action", "text": _clean(task)[0].upper() + _clean(task)[1:], "owner": uid, "priority": "high", "created_by": uid})
+        # -- actions (per sentence, so "Rahul, check X. Ananya, pull Y." yields two) ------
+        for sent in re.split(r"(?<=[.!?])\s+", text):
+            st = sent.lower()
+            target = _match_participant(inc, sent, exclude=uid)
+            if target and re.search(ACTION_VERBS, st):
+                task = re.sub(rf"^.*?{ACTION_VERBS}\s*", "", sent, flags=re.I)
+                ops.append({"op": "add_action", "text": f"Investigate {_clean(task)}", "owner": target,
+                            "priority": "critical" if "database" in st or "db" in st else "high", "created_by": uid})
+            elif re.search(rf"\b(someone|somebody|anyone|can we)\b.*{ACTION_VERBS}", st):
+                task = re.sub(rf"^.*?{ACTION_VERBS}\s*", "", sent, flags=re.I)
+                ops.append({"op": "add_action", "text": f"Investigate {_clean(task)}", "owner": None, "priority": "high", "created_by": uid})
+                iv = iv or {"action": "ASK", "speech": f"That action has no owner yet: {_clean(task)}. Who is taking it?", "urgency": "medium"}
+            elif re.search(r"\b(i'll|i will|let me|i'm on it|i can)\b", st) and not any(c in st for c in HYPOTHESIS_CUES):
+                task = re.sub(r"^.*?\b(i'll|i will|let me|i can)\s*", "", sent, flags=re.I)
+                if len(task) > 6:
+                    task = _clean(task)
+                    ops.append({"op": "add_action", "text": task[0].upper() + task[1:], "owner": uid, "priority": "high", "created_by": uid})
 
         # -- action completion / findings -------------------------------------
         if any(c in t for c in DONE_CUES):
@@ -202,16 +206,18 @@ class RuleExtractor:
         # -- conflict detection --------------------------------------------------
         topic = _topic(text)
         pol = _polarity(text)
-        if topic and pol != 0 and not any(c in t for c in HYPOTHESIS_CUES):
+        hedged = any(c in t for c in HYPOTHESIS_CUES)
+        if topic and pol != 0:
             prior = self.claims.setdefault(topic, [])
+            already = any(c.topic == topic for c in inc.conflicts)
             for (puid, ppol, ptext) in prior:
-                if puid != uid and ppol != pol:
+                if puid != uid and ppol != pol and not already:
                     ops.append({"op": "add_conflict", "topic": topic, "claim_a": ptext, "by_a": puid, "claim_b": _clean(text), "by_b": uid})
                     iv = {"action": "WARN", "urgency": "high",
                           "speech": f"I want to flag conflicting information about {topic}. {inc.name_of(puid)} reported “{ptext}”, but {speaker} reports “{_clean(text)}”. Can someone verify the current state before we treat this as settled?"}
                     break
             prior.append((uid, pol, _clean(text)))
-            if pol == 1:
+            if pol == 1 and not hedged:
                 ops.append({"op": "add_observation", "text": _clean(text), "by": uid})
 
         return ops, iv

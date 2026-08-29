@@ -127,7 +127,8 @@ class Engine:
             for u in inc.unknowns:
                 if u.status == "open" and "authentication" in u.question.lower():
                     ops.append({"op": "answer_unknown", "id": u.id, "answer": f"Auth success rate {auth:.1f}% — unaffected (monitoring)"})
-        if psr > 95 and prev.get("payment_success_rate", 100) < 95 and self._has_fact(inc, "payment success rate", "dropped"):
+        if (psr > 95 and prev.get("payment_success_rate", 100) < 95 and self._has_fact(inc, "payment success rate", "dropped")
+                and inc.status not in (m.IncidentStatus.RECOVERED, m.IncidentStatus.RESOLVED)):
             txt = f"Payment success rate recovered to {psr:.1f}%"
             ops.append({"op": "add_fact", "text": txt, "confidence": 0.98, "evidence": [{"source": "monitoring", "summary": txt}]})
             notes.append(txt)
@@ -179,11 +180,11 @@ class Engine:
                         ops.append({"op": "answer_unknown", "id": u.id, "answer": f"Approved by {inc.name_of(p.approved_by)}"})
         for c in inc.conflicts:
             if c.status == "open" and "database" in c.topic:
-                if any(h.status == m.HypothesisStatus.CONFIRMED and "pool" in h.text.lower() or "database" in h.text.lower() and h.status == m.HypothesisStatus.CONFIRMED for h in inc.hypotheses):
+                if any(h.status == m.HypothesisStatus.CONFIRMED and any(k in h.text.lower() for k in ("pool", "database", "db")) for h in inc.hypotheses):
                     ops.append({"op": "resolve_conflict", "id": c.id, "resolution": "Node-level health was fine; connection pool was exhausted. Both reports were partially right."})
         for h in inc.hypotheses:
             if h.status == m.HypothesisStatus.CONFIRMED and any(k in h.text.lower() for k in ("pool", "database")):
-                if not any(p.tool == "create_jira_ticket" and "pool" in str(p.args).lower() for p in inc.proposals):
+                if not any(p.tool == "post_slack_update" and "Confirmed:" in str(p.args) for p in inc.proposals):
                     ops.append({"op": "propose_tool", "tool": "post_slack_update", "args": {"text": f"Confirmed: {h.text}. Investigating trigger. Status: {inc.status.value}."}, "reason": "confirmed finding"})
         return ops
 
@@ -303,6 +304,7 @@ class Engine:
             t.cancel()
 
     async def _scenario(self, inc: m.Incident, speed: float, auto_approve: bool) -> None:
+        monitoring.speed = speed
         for p in scenario.PARTICIPANTS:
             store.add_participant(inc, p["uid"], p["name"], m.Role(p["role"]), p["focus"])
         await self.say(inc, "Sentinel here. I've joined the room and I'm tracking facts, hypotheses, actions and conflicts. I'll only speak when it helps.", "SUMMARIZE", "low")
@@ -315,7 +317,16 @@ class Engine:
                     await self.say(inc, *speech)
             elif kind == "metrics":
                 store._timeline(inc, "metric", payload["note"])
-                await monitoring.set_phase(payload["phase"]) if payload["phase"] != "recovered" else await monitoring.recover_over(seconds=6 / speed)
+                if payload["phase"] != "recovered":
+                    await monitoring.set_phase(payload["phase"])
+                elif any(p.tool == "rollback_deployment" and p.approval == m.ApprovalStatus.APPROVED for p in inc.proposals):
+                    # the deploy adapter drives recovery after a real rollback; wait for it
+                    for _ in range(int(60 * speed)):
+                        if monitoring.phase == "recovered":
+                            break
+                        await asyncio.sleep(0.25 / speed)
+                else:
+                    await monitoring.recover_over(seconds=6)
             elif kind == "await_approval":
                 prop = next((p for p in inc.proposals if p.tool == payload["tool"]), None)
                 if prop and auto_approve:

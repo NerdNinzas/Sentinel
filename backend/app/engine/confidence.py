@@ -18,7 +18,8 @@ def compute(inc: m.Incident) -> m.ConfidenceMatrix:
         c.customer_impact = 0.8
     if mx.get("payment_success_rate", 100) < 50 or "customers" in facts:
         c.customer_impact = max(c.customer_impact, 0.9)
-    if c.customer_impact >= 0.8 and mx.get("payment_success_rate", 100) < 50:
+    # customer report + metric-backed payment fact => impact is well established (stays high after recovery)
+    if c.customer_impact >= 0.8 and (mx.get("payment_success_rate", 100) < 50 or any("payment success rate" in f.text.lower() for f in inc.facts)):
         c.customer_impact = 0.98
 
     # outage scope: do we have a metric-backed fact about the failing system?
@@ -61,5 +62,7 @@ def spoken_summary(inc: m.Incident) -> str:
     c = inc.confidence
     high = [k for k, v in c.model_dump().items() if v >= 0.85]
     low = [k for k, v in c.model_dump().items() if v < 0.5]
-    pretty = lambda ks: ", ".join(k.replace("_", " ") for k in ks) or "nothing yet"
-    return f"We have high confidence about {pretty(high)}, and low confidence about {pretty(low)}."
+    pretty = lambda ks: ", ".join(k.replace("_", " ") for k in ks)
+    if not high:
+        return f"Confidence is still low across the board — especially {pretty(low[:3])}."
+    return f"We have high confidence about {pretty(high)}" + (f", and low confidence about {pretty(low)}." if low else ".")

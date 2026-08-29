@@ -38,7 +38,7 @@ def config():
 
 
 @router.post("/incidents")
-def create(body: CreateIncident):
+async def create(body: CreateIncident):
     inc = store.create(body.title, body.severity, body.channel or "")
     if not inc.channel:
         inc.channel = f"sentinel-{inc.id.lower()}"
@@ -64,7 +64,7 @@ class JoinBody(BaseModel):
 
 
 @router.post("/incidents/{incident_id}/join")
-def join(incident_id: str, body: JoinBody):
+async def join(incident_id: str, body: JoinBody):
     inc = _inc(incident_id)
     store.add_participant(inc, body.uid, body.name, body.role, body.focus)
     s = get_settings()
@@ -77,7 +77,7 @@ class RoleBody(BaseModel):
 
 
 @router.post("/incidents/{incident_id}/participants/{uid}/role")
-def set_role(incident_id: str, uid: str, body: RoleBody):
+async def set_role(incident_id: str, uid: str, body: RoleBody):
     inc = _inc(incident_id)
     p = inc.participants.get(uid)
     if not p:
@@ -96,7 +96,7 @@ class TranscriptBody(BaseModel):
 
 
 @router.post("/incidents/{incident_id}/transcript")
-def transcript(incident_id: str, body: TranscriptBody):
+async def transcript(incident_id: str, body: TranscriptBody):
     """Ingest a transcript line: forwarded Agora RTM `user.transcription`, browser STT, or typed text."""
     inc = _inc(incident_id)
     line = engine.ingest_transcript(inc, body.uid, body.text, body.final, body.turn_id)
@@ -139,13 +139,13 @@ async def agent_stop(incident_id: str):
 
 
 @router.post("/incidents/{incident_id}/demo/start")
-def demo_start(incident_id: str, speed: float = 1.0, auto_approve: bool = False):
+async def demo_start(incident_id: str, speed: float = 1.0, auto_approve: bool = False):
     engine.run_scenario(_inc(incident_id), speed=speed, auto_approve=auto_approve)
     return {"ok": True}
 
 
 @router.post("/incidents/{incident_id}/demo/stop")
-def demo_stop(incident_id: str):
+async def demo_stop(incident_id: str):
     engine.stop_scenario(_inc(incident_id))
     return {"ok": True}
 
@@ -164,7 +164,7 @@ async def get_report(incident_id: str):
 
 
 @router.get("/incidents/{incident_id}/status-speech")
-def status_speech(incident_id: str):
+async def status_speech(incident_id: str):
     return {"text": report.status_speech(_inc(incident_id))}
 
 

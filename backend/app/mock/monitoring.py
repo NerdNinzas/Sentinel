@@ -25,12 +25,14 @@ BASELINE = {
 OUTAGE = {
     "payment_success_rate": 21.0,
     "payment_error_rate": 79.0,
-    "db_connection_utilization": 100.0,
-    "db_pool_wait_ms": 4800.0,
+    "db_connection_utilization": 88.0,     # saturation shows up a few minutes later (see DB_SATURATED)
+    "db_pool_wait_ms": 900.0,
     "db_p95_latency_ms": 2900.0,
     "api_p95_latency_ms": 6100.0,
     "auth_success_rate": 99.6,
 }
+
+DB_SATURATED = {**OUTAGE, "db_connection_utilization": 100.0, "db_pool_wait_ms": 4800.0}
 
 DEPLOYMENTS = [
     {"service": "payment-api", "version": "v4.2", "at_offset_min": -6,
@@ -46,6 +48,7 @@ class MockMonitoring:
         self.phase = "baseline"          # baseline | outage | recovering | recovered
         self._subs: list[MetricCallback] = []
         self.started = time.time()
+        self.speed = 1.0                 # demo time-scale; >1 makes recovery faster
 
     def subscribe(self, cb: MetricCallback) -> None:
         self._subs.append(cb)
@@ -58,6 +61,8 @@ class MockMonitoring:
         self.phase = phase
         if phase == "outage":
             self.current = dict(OUTAGE)
+        elif phase == "db_saturated":
+            self.current = dict(DB_SATURATED)
         elif phase == "recovering":
             self.current = {k: (BASELINE[k] + OUTAGE[k]) / 2 for k in BASELINE}
         elif phase == "recovered":
@@ -70,10 +75,12 @@ class MockMonitoring:
     async def recover_over(self, seconds: float = 8.0, steps: int = 4) -> None:
         for i in range(1, steps + 1):
             f = i / steps
-            self.current = {k: OUTAGE[k] + (BASELINE[k] - OUTAGE[k]) * f for k in BASELINE}
+            self.current = {k: DB_SATURATED[k] + (BASELINE[k] - DB_SATURATED[k]) * f for k in BASELINE}
             self.phase = "recovering" if i < steps else "recovered"
+            if i == steps:
+                self.current["payment_success_rate"] = 99.1
             await self._emit()
-            await asyncio.sleep(seconds / steps)
+            await asyncio.sleep(seconds / steps / self.speed)
 
     # ---- tool-facing query API ----------------------------------------
     def query(self, metric: Optional[str] = None) -> dict:
