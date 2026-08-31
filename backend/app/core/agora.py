@@ -38,8 +38,13 @@ class AgoraConvoAI:
                         greeting: str, name: str) -> dict[str, Any]:
         s = get_settings()
         tts_params = json.loads(s.agora_tts_params_json)
+        # No TTS key? Use Agora-managed credentials: Agora supplies the vendor key
+        # and bills through the Agora account (docs: models/tts, credential_mode).
+        tts = {"vendor": s.agora_tts_vendor, "params": tts_params}
         if s.agora_tts_api_key:
             tts_params["api_key"] = s.agora_tts_api_key
+        else:
+            tts["credential_mode"] = "managed"
         return {
             "name": name,
             "properties": {
@@ -57,7 +62,7 @@ class AgoraConvoAI:
                     "enable_error_message": True,
                 },
                 "asr": {
-                    "vendor": s.agora_asr_vendor,
+                    "vendor": s.agora_asr_vendor,   # "ares" = Agora's built-in ASR
                     "language": s.agora_asr_language,
                 },
                 "llm": {
@@ -71,7 +76,7 @@ class AgoraConvoAI:
                     "max_history": 32,
                     "params": {"model": "sentinel-v1", "channel": channel},
                 },
-                "tts": {"vendor": s.agora_tts_vendor, "params": tts_params},
+                "tts": tts,
             },
         }
 
