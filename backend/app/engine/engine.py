@@ -34,7 +34,8 @@ class Engine:
         self.locks: dict[str, asyncio.Lock] = {}
         self.last_spoke: dict[str, float] = {}
         self.chased: set[str] = set()
-        self.debounce: dict[str, asyncio.Task] = {}
+        self.wake: dict[str, asyncio.Event] = {}
+        self.workers: dict[str, asyncio.Task] = {}
         self.scenarios: dict[str, asyncio.Task] = {}
         self.prev_metrics: dict[str, float] = {}
         self.agora = AgoraConvoAI()
@@ -46,7 +47,7 @@ class Engine:
         self._followup = asyncio.create_task(self._followup_loop())
 
     async def stop(self) -> None:
-        for t in list(self.scenarios.values()) + ([self._followup] if self._followup else []):
+        for t in list(self.scenarios.values()) + list(self.workers.values()) + ([self._followup] if self._followup else []):
             t.cancel()
 
     def _lock(self, inc_id: str) -> asyncio.Lock:
@@ -72,16 +73,26 @@ class Engine:
         return line
 
     def _schedule(self, inc: m.Incident) -> None:
-        t = self.debounce.get(inc.id)
-        if t and not t.done():
-            t.cancel()
+        """Wake the incident's worker. A worker never cancels in-flight work:
+        lines that arrive during an LLM call are simply picked up by the next
+        tick (the pending list is the queue)."""
+        self.wake.setdefault(inc.id, asyncio.Event()).set()
+        w = self.workers.get(inc.id)
+        if not w or w.done():
+            self.workers[inc.id] = asyncio.create_task(self._worker(inc))
 
-        async def later():
-            await asyncio.sleep(DEBOUNCE_S)
-            speech = await self.tick(inc)
-            if speech:
-                await self.say(inc, *speech)
-        self.debounce[inc.id] = asyncio.create_task(later())
+    async def _worker(self, inc: m.Incident) -> None:
+        ev = self.wake[inc.id]
+        while True:
+            await ev.wait()
+            await asyncio.sleep(DEBOUNCE_S)   # let a burst of lines coalesce
+            ev.clear()
+            try:
+                speech = await self.tick(inc)
+                if speech:
+                    await self.say(inc, *speech)
+            except Exception as e:
+                log.exception("tick failed: %s", e)
 
     async def on_metrics(self, metrics: dict[str, float]) -> None:
         prev, self.prev_metrics = self.prev_metrics, dict(metrics)
