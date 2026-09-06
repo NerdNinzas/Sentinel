@@ -82,6 +82,20 @@ class MockMonitoring:
             await self._emit()
             await asyncio.sleep(seconds / steps / self.speed)
 
+    async def ingest_live(self, health: dict) -> None:
+        """Feed real /health data from the deployed service into the same pipeline."""
+        psr = float(health.get("payment_success_rate", 100.0))
+        self.current = {
+            "payment_success_rate": psr,
+            "payment_error_rate": round(100 - psr, 1),
+            "db_connection_utilization": float(health.get("db_connection_utilization", 0.0)),
+            "db_pool_in_use": float(health.get("db_connections_in_use", 0)),
+            "db_pool_size": float(health.get("pool_size", 0)),
+            "payments_total": float(health.get("payments_total", 0)),
+        }
+        self.phase = "live"
+        await self._emit()
+
     # ---- tool-facing query API ----------------------------------------
     def query(self, metric: Optional[str] = None) -> dict:
         if metric:

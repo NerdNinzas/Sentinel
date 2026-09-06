@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { MessageSquareText, SendHorizonal } from "lucide-react";
 import type { TranscriptLine } from "@/lib/types";
 import { api } from "@/lib/api";
-import { hm } from "@/lib/utils";
+import { avatarColor, hm } from "@/lib/utils";
 import { Avatar } from "./ui";
 
 export function Transcript({ incidentId, lines, me }: { incidentId: string; lines: TranscriptLine[]; me: { uid: string; name: string } | null }) {
@@ -21,7 +21,7 @@ export function Transcript({ incidentId, lines, me }: { incidentId: string; line
             <div key={l.id} className={`flex items-start gap-2 ${ai ? "rounded-xl border border-[var(--blue)]/30 bg-[var(--blue)]/8 p-2" : ""}`}>
               <Avatar uid={l.uid} name={l.name} size={24} className="mt-0.5" />
               <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2"><b className={ai ? "text-[var(--blue)]" : ""}>{l.name}</b><span className="mono text-[10px] text-[var(--dim)]">{hm(l.at)}</span></div>
+                <div className="flex items-baseline gap-2"><b style={ai ? undefined : { color: avatarColor(l.uid) }} className={ai ? "text-[var(--blue)]" : ""}>{l.name}</b>{l.uid.startsWith("slack-") && <span className="chip chip-purple">SLACK</span>}<span className="mono text-[10px] text-[var(--dim)]">{hm(l.at)}</span></div>
                 <div className="leading-snug text-[var(--text)]/90">{l.text}</div>
               </div>
             </div>

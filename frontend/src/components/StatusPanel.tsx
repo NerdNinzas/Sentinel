@@ -14,7 +14,9 @@ export function StatusPanel({ inc }: { inc: Incident }) {
   const overall = inc.confidence.primary_finding;
   return (
     <div className="panel p-4">
-      <div className="ph"><Gauge />Incident status</div>
+      <div className="ph"><Gauge />Incident status
+        {(m.payments_total ?? 0) > 0 && <span className="chip chip-green ml-auto"><span className="pulse inline-block h-1.5 w-1.5 rounded-full bg-[var(--green)]" />LIVE TELEMETRY</span>}
+      </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <Tile label="Payment success" value={`${psr.toFixed(0)}%`} color={psr < 50 ? "var(--red)" : psr < 95 ? "var(--amber)" : "var(--green)"} Icon={psr < 95 ? TrendingDown : TrendingUp} spark={history.map((h) => h.psr)} />
         <Tile label="DB connections" value={`${db.toFixed(0)}%`} color={db >= 95 ? "var(--red)" : db > 80 ? "var(--amber)" : "var(--green)"} Icon={Database} spark={history.map((h) => h.db)} />
@@ -48,8 +50,9 @@ export function StatusPanel({ inc }: { inc: Incident }) {
 }
 
 function Tile({ label, value, color, Icon, spark }: { label: string; value: string; color: string; Icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; spark?: number[] }) {
+  const hot = color === "var(--red)";
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-2)] p-2.5">
+    <div className={`rounded-sm border p-2.5 transition-colors ${hot ? "border-[var(--red)]/50 bg-[var(--red)]/6" : "border-[var(--border)] bg-[var(--bg-2)]"}`}>
       <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-[var(--muted)]"><span>{label}</span><Icon className="h-3.5 w-3.5" style={{ color }} /></div>
       <div className="mt-1 flex items-end justify-between gap-1">
         <span className="mono text-2xl font-semibold leading-none tabular-nums" style={{ color }}>{value}</span>

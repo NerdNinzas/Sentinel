@@ -28,8 +28,8 @@ export function StatePanel({ inc }: { inc: Incident }) {
       <div className="ph"><Layers />Incident state</div>
       <div className="mt-3 grid grid-cols-4 gap-1">
         {TABS.map(({ id, Icon, label }) => (
-          <button key={id} onClick={() => setTab(id)} className={cn("flex items-center justify-between rounded-lg border px-2 py-1.5 text-[11px] transition", tab === id ? "border-[var(--blue)] bg-[var(--blue)]/10 text-[var(--text)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]", id === "conflicts" && counts[id] > 0 && "text-[var(--amber)] border-[var(--amber)]/50")}>
-            <span className="flex items-center gap-1"><Icon className="h-3 w-3" />{label}</span><span className="mono">{counts[id]}</span>
+          <button key={id} onClick={() => setTab(id)} className={cn("flex items-center justify-between gap-1 border px-2 py-1.5 font-sans text-[10.5px] transition", tab === id ? "border-[var(--blue)] bg-[var(--blue)]/10 text-[var(--text)]" : "border-[var(--border)] text-[var(--muted)] hover:bg-[var(--panel-2)]", id === "conflicts" && counts[id] > 0 && "text-[var(--amber)] border-[var(--amber)]/50")}>
+            <span className="flex min-w-0 items-center gap-1"><Icon className="h-3 w-3 shrink-0" />{label}</span><span className="mono text-[var(--dim)]">{counts[id]}</span>
           </button>
         ))}
       </div>

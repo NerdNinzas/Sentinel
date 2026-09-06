@@ -11,11 +11,14 @@ import { api } from "@/lib/api";
 import { useIncident } from "@/store/useIncident";
 
 type Status = "idle" | "connecting" | "live" | "browser" | "error";
+export type AgentAudio = "none" | "playing" | "blocked";
 
 export function useAgoraRoom(incidentId: string) {
   const [status, setStatus] = useState<Status>("idle");
   const [muted, setMuted] = useState(false);
+  const [agentAudio, setAgentAudio] = useState<AgentAudio>("none");
   const [error, setError] = useState<string | null>(null);
+  const remoteTracks = useRef<Array<{ play: () => void }>>([]);
   const me = useIncident((s) => s.me);
   const popSentinel = useIncident((s) => s.popSentinel);
   const queueLen = useIncident((s) => s.sentinelQueue.length);
@@ -57,18 +60,38 @@ export function useAgoraRoom(incidentId: string) {
     try {
       const cfg = await api.config();
       const info = await api.join(incidentId, me.uid, me.name, "unknown");
+      // The server is authoritative about our uid (it may rewrite it to the signed-in
+      // login) and the RTC/RTM tokens are minted for THAT uid — joining with a stale
+      // localStorage uid makes Agora reject the join silently.
+      const uid = info.uid || me.uid;
+      try { localStorage.setItem("sentinel.me", JSON.stringify({ ...me, uid })); } catch {}
       if (!cfg.agora_app_id) {
         startBrowserSTT(); setStatus("browser"); return;
       }
       const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
-      AgoraRTC.setLogLevel(3);
+      AgoraRTC.setLogLevel(2);
+      // Browsers can block audio that starts without a fresh user gesture.
+      AgoraRTC.onAutoplayFailed = () => setAgentAudio("blocked");
       const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
       client.on("user-published", async (user: any, mediaType: any) => {
+        console.log("[agora] user-published", user.uid, mediaType);
         await client.subscribe(user, mediaType);
-        if (mediaType === "audio") user.audioTrack?.play();
+        if (mediaType === "audio" && user.audioTrack) {
+          remoteTracks.current.push(user.audioTrack);
+          try { user.audioTrack.play(); setAgentAudio((a) => (a === "blocked" ? a : "playing")); }
+          catch { setAgentAudio("blocked"); }
+        }
       });
-      await client.join(info.app_id, info.channel, info.tokens.rtc || null, me.uid);
-      const track = await AgoraRTC.createMicrophoneAudioTrack();
+      client.on("user-unpublished", (user: any, mediaType: any) => {
+        console.log("[agora] user-unpublished", user.uid, mediaType);
+        if (mediaType === "audio") setAgentAudio("none");
+      });
+      client.on("connection-state-change", (cur: string, prev: string, reason?: string) => {
+        console.log("[agora] connection", prev, "->", cur, reason ?? "");
+        if (cur === "DISCONNECTED" && reason === "UID_BANNED") setError("kicked: same user joined from another tab");
+      });
+      await client.join(info.app_id, info.channel, info.tokens.rtc || null, uid);
+      const track = await AgoraRTC.createMicrophoneAudioTrack({ AEC: true, ANS: true, AGC: true });
       await client.publish([track]);
       rtcRef.current = client; trackRef.current = track;
 
@@ -76,7 +99,7 @@ export function useAgoraRoom(incidentId: string) {
       try {
         const mod: any = await import("agora-rtm");
         const RTM = mod.RTM ?? mod.default?.RTM ?? mod.default;
-        const rtm = new RTM(info.app_id, me.uid, info.tokens.rtm ? { token: info.tokens.rtm } : undefined);
+        const rtm = new RTM(info.app_id, uid, info.tokens.rtm ? { token: info.tokens.rtm } : undefined);
         rtm.addEventListener("message", (ev: any) => {
           try {
             const raw = typeof ev.message === "string" ? ev.message : new TextDecoder().decode(ev.message);
@@ -97,7 +120,13 @@ export function useAgoraRoom(incidentId: string) {
     }
   }, [incidentId, me, startBrowserSTT]);
 
+  const unblockAudio = useCallback(() => {
+    remoteTracks.current.forEach((t) => { try { t.play(); } catch {} });
+    setAgentAudio("playing");
+  }, []);
+
   const leave = useCallback(async () => {
+    remoteTracks.current = []; setAgentAudio("none");
     recRef.current?.stop?.(); recRef.current = null;
     trackRef.current?.close?.(); await rtcRef.current?.leave?.();
     try { await rtmRef.current?.logout?.(); } catch {}
@@ -112,5 +141,5 @@ export function useAgoraRoom(incidentId: string) {
   }, [muted, status, startBrowserSTT]);
 
   useEffect(() => () => { leave(); }, [leave]);
-  return { status, error, muted, join, leave, toggleMute };
+  return { status, error, muted, join, leave, toggleMute, agentAudio, unblockAudio };
 }

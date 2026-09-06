@@ -5,7 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.core import auth, db
 from app.core.config import get_settings
+from fastapi import Depends
 from app.core.token import build_tokens
 from app.engine import models as m
 from app.engine import report
@@ -27,6 +29,7 @@ class CreateIncident(BaseModel):
     title: str = "Payment API Outage"
     severity: m.Severity = m.Severity.SEV1
     channel: Optional[str] = None
+    repo: Optional[str] = None          # "owner/name"; empty string disables the default
 
 
 @router.get("/config")
@@ -34,15 +37,35 @@ def config():
     s = get_settings()
     return {"agora_app_id": s.agora_app_id, "agora_configured": engine.agora.configured,
             "llm_available": bool(s.llm_api_key), "llm_model": s.llm_model, "demo_mode": s.demo_mode,
-            "agent_uid": s.agora_agent_uid}
+            "agent_uid": s.agora_agent_uid,
+            "auth_required": s.auth_required, "github_oauth": bool(s.github_oauth_client_id),
+            "mongodb": db.available()}
 
 
 @router.post("/incidents")
-async def create(body: CreateIncident):
+async def create(body: CreateIncident, user: dict = Depends(auth.require_user)):
+    import asyncio
     inc = store.create(body.title, body.severity, body.channel or "")
     if not inc.channel:
         inc.channel = f"sentinel-{inc.id.lower()}"
+    repo = get_settings().github_default_repo if body.repo is None else body.repo
+    if repo:
+        asyncio.create_task(engine.link_repo(inc, repo, token=user.get("github_token") or None))
+    if user.get("_id"):
+        asyncio.create_task(db.record_membership(user["_id"], inc.id, "incident_commander", "created"))
+    asyncio.create_task(engine.link_jira(inc))
     return inc.model_dump(mode="json")
+
+
+class RepoBody(BaseModel):
+    repo: str
+
+
+@router.post("/incidents/{incident_id}/repo")
+async def set_repo(incident_id: str, body: RepoBody, user: dict = Depends(auth.require_user)):
+    inc = _inc(incident_id)
+    await engine.link_repo(inc, body.repo.strip(), token=user.get("github_token") or None)
+    return {"repo": inc.repo, "changes": inc.repo_changes}
 
 
 @router.get("/incidents")
@@ -64,9 +87,15 @@ class JoinBody(BaseModel):
 
 
 @router.post("/incidents/{incident_id}/join")
-async def join(incident_id: str, body: JoinBody):
+async def join(incident_id: str, body: JoinBody, user: dict = Depends(auth.require_user)):
+    import asyncio
     inc = _inc(incident_id)
+    if user.get("_id"):
+        body.uid, body.name = user["login"], user.get("name") or user["login"]
+        asyncio.create_task(db.record_membership(user["_id"], inc.id, body.role.value, "joined"))
     store.add_participant(inc, body.uid, body.name, body.role, body.focus)
+    if inc.agent_id and engine.agora.configured:
+        asyncio.create_task(engine.agora.speak(inc.agent_id, f"{body.name} joined the room. Welcome — I am listening."))
     s = get_settings()
     return {"channel": inc.channel, "app_id": s.agora_app_id, "uid": body.uid, "tokens": build_tokens(inc.channel, body.uid)}
 
@@ -148,6 +177,38 @@ async def demo_start(incident_id: str, speed: float = 1.0, auto_approve: bool = 
 async def demo_stop(incident_id: str):
     engine.stop_scenario(_inc(incident_id))
     return {"ok": True}
+
+
+@router.post("/incidents/{incident_id}/end")
+async def end_session(incident_id: str, user: dict = Depends(auth.require_user)):
+    """End the war room: stop demo + agent, resolve, persist a final snapshot."""
+    inc = _inc(incident_id)
+    engine.stop_scenario(inc)
+    try:
+        await engine.stop_agent(inc)
+    except Exception:
+        pass
+    await engine._apply(inc, [{"op": "set_status", "status": "resolved"}])
+    store._timeline(inc, "incident", f"Session ended by {inc.name_of(user.get('login', 'operator'))} — final report available")
+    store.publish_state(inc)
+    await db.save_incident_now(inc)
+    return inc.model_dump(mode="json")
+
+
+@router.delete("/incidents/{incident_id}")
+async def delete_incident(incident_id: str, user: dict = Depends(auth.require_user)):
+    """Remove a room entirely (store + Mongo history)."""
+    inc = _inc(incident_id)
+    engine.stop_scenario(inc)
+    try:
+        await engine.stop_agent(inc)
+    except Exception:
+        pass
+    store.incidents.pop(incident_id, None)
+    if db.available():
+        await db.db().incidents.delete_one({"_id": incident_id})
+        await db.db().memberships.delete_many({"incident_id": incident_id})
+    return {"deleted": incident_id}
 
 
 @router.post("/incidents/{incident_id}/resolve")

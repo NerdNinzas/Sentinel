@@ -16,6 +16,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.config import get_settings
 from app.engine.engine import engine
+from app.engine.models import now
 from app.engine.store import store
 
 router = APIRouter(tags=["agora-llm"])
@@ -46,26 +47,54 @@ async def chat_completions(request: Request, authorization: str | None = Header(
     if last_user:
         c = last_user.get("content")
         text = c if isinstance(c, str) else " ".join(p.get("text", "") for p in c if isinstance(p, dict))
-    # Give the RTM-forwarded transcript (which carries the speaker uid) a moment to land first.
-    await asyncio.sleep(0.4)
-    if text:
-        engine.ingest_transcript(inc, last_user.get("uid") or "unknown", text, schedule=False)
-    speech = await engine.tick(inc)
     rid, model = "chatcmpl-" + uuid.uuid4().hex[:12], body.get("model", "sentinel-v1")
 
     async def gen():
-        yield _sse({"id": rid, "object": "chat.completion.custom_metadata", "choices": [],
-                    "metadata": {"interruptable": True}})
+        # First byte goes out IMMEDIATELY — Agora abandons slow LLMs before the
+        # first chunk, which silently drops the reply from TTS.
+        yield _sse({"id": rid, "object": "chat.completion.chunk", "created": int(time.time()), "model": model,
+                    "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]})
         content = ""
-        if speech:
-            content = speech[0]
-            store.sentinel_said(inc, content, speech[1])
-            engine.last_spoke[inc.id] = time.time()
-        for chunk in ([content[i:i + 40] for i in range(0, len(content), 40)] or [""]):
+        try:
+            # tiny wait so the RTM-forwarded copy (with the speaker uid) lands first
+            await asyncio.sleep(0.3)
+            # RTM already delivered this utterance WITH the speaker's identity in most
+            # cases — the anonymous callback copy (which also accumulates turn text)
+            # is only a fallback for rooms where no dashboard is forwarding RTM.
+            recent_rtm = any(
+                l.uid not in ("sentinel", "unknown") and (now() - l.at).total_seconds() < 12
+                for l in inc.transcript[-6:]) or bool(engine.pending.get(inc.id))
+            if text and not recent_rtm:
+                # The callback is anonymous and ACCUMULATES the turn's sentences.
+                # 1) keep only sentences we haven't already heard
+                import difflib, re as _re
+                def _n(t: str) -> str:
+                    return _re.sub(r"[^a-z0-9 ]+", "", t.lower()).strip()
+                recent = [l.text for l in inc.transcript[-6:] if l.uid != "sentinel"]
+                fresh = []
+                for sent in _re.split(r"(?<=[.?!।])\s+", text):
+                    if len(_n(sent)) < 2:
+                        continue
+                    if any(difflib.SequenceMatcher(None, _n(sent), _n(r)).ratio() > 0.7 or _n(sent) in _n(r) for r in recent):
+                        continue
+                    fresh.append(sent)
+                # 2) a room with exactly one human isn't anonymous at all
+                humans = [p for p in inc.participants.values() if p.uid not in ("sentinel",)]
+                uid = humans[0].uid if len(humans) == 1 else (last_user.get("uid") or "unknown")
+                if fresh:
+                    engine.ingest_transcript(inc, uid, " ".join(fresh), schedule=False)
+            speech = await asyncio.wait_for(engine.tick(inc), timeout=12)
+            if speech:
+                content = speech[0]
+                store.sentinel_said(inc, content, speech[1])
+                engine.last_spoke[inc.id] = time.time()
+        except Exception as e:
+            log.warning("llm turn failed: %s", e)
+        for i in range(0, len(content), 40):
             yield _sse({"id": rid, "object": "chat.completion.chunk", "created": int(time.time()), "model": model,
-                        "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}]})
+                        "choices": [{"index": 0, "delta": {"content": content[i:i + 40]}, "finish_reason": None}]})
         yield _sse({"id": rid, "object": "chat.completion.chunk", "created": int(time.time()), "model": model,
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})

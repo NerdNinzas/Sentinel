@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable, Optional
 from app.engine import models as m
 from app.engine.store import store
 from app.tools import adapters
+from app.tools import github as gh
 
 log = logging.getLogger("sentinel.gateway")
 
@@ -57,6 +58,30 @@ async def _deploys(inc: m.Incident, args: dict) -> dict:
 @register("page_oncall", "safe", "Page an on-call responder via PagerDuty")
 async def _page(inc: m.Incident, args: dict) -> dict:
     return await adapters.pagerduty.page(inc, args.get("team", "sre"), args.get("reason", ""))
+
+
+@register("github_recent_changes", "safe", "Fetch recent commits/PRs from the linked GitHub repo")
+async def _gh_changes(inc: m.Incident, args: dict) -> dict:
+    if not inc.repo:
+        return {"summary": "no repo linked"}
+    data = await gh.fetch_changes(inc.repo, inc.started_at)
+    return {"summary": f"{len(data['commits'])} commits, {len(data['merged_prs'])} merged PRs in window", **data}
+
+
+@register("create_github_issue", "safe", "Open a follow-up issue on the linked GitHub repo")
+async def _gh_issue(inc: m.Incident, args: dict) -> dict:
+    return await gh.create_issue(inc.repo or "", args.get("title", f"[{inc.id}] follow-up"), args.get("body", ""))
+
+
+@register("comment_on_pr", "safe", "Post incident findings as a comment on a PR of the linked repo")
+async def _gh_comment(inc: m.Incident, args: dict) -> dict:
+    return await gh.comment_on_pr(inc.repo or "", int(args.get("number", 0)), args.get("body", ""))
+
+
+@register("open_revert_pr", "critical", "Open + merge a revert PR for a suspect commit on the linked repo (triggers redeploy)")
+async def _gh_revert(inc: m.Incident, args: dict) -> dict:
+    sha = args.get("sha") or next((c["sha"] for c in inc.repo_changes.get("commits", []) if c.get("suspect")), "")
+    return await gh.open_revert_pr(inc.repo or "", sha, args.get("reason", "suspect change correlated with the incident"))
 
 
 # ---- critical tools (human approval required) -------------------------------

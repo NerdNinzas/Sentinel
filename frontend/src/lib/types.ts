@@ -16,6 +16,10 @@ export interface ToolProposal { id: string; tool: string; args: Record<string, u
 export interface ConfidenceMatrix { customer_impact: number; outage_scope: number; primary_finding: number; change_correlation: number; root_cause: number; recovery: number; }
 export interface TranscriptLine { id: string; uid: string; name: string; text: string; at: string; final: boolean; turn_id?: number | null; }
 
+export interface RepoCommit { sha: string; message: string; author: string; url?: string | null; at?: string | null; minutes_before_incident?: number | null; suspect: boolean; }
+export interface RepoPR { number: number; title: string; author: string; url?: string | null; merged_at: string; minutes_before_incident: number; suspect: boolean; }
+export interface RepoChanges { repo?: string; branch?: string | null; commits?: RepoCommit[]; merged_prs?: RepoPR[]; failed_runs?: Array<{ name: string; url: string; branch: string; at: string }>; release?: { tag: string; url: string; at: string } | null; error?: string | null; }
+
 export interface Incident {
   id: string; title: string; severity: "SEV-1" | "SEV-2" | "SEV-3";
   status: "investigating" | "identified" | "mitigating" | "recovered" | "resolved";
@@ -24,6 +28,7 @@ export interface Incident {
   facts: Fact[]; observations: unknown[]; hypotheses: Hypothesis[]; decisions: Decision[]; actions: Action[];
   conflicts: Conflict[]; unknowns: Unknown[]; risks: Risk[]; timeline: TimelineEvent[]; proposals: ToolProposal[];
   confidence: ConfidenceMatrix; metrics: Record<string, number>; agent_id?: string | null; version: number;
+  repo?: string | null; repo_changes: RepoChanges;
 }
 
 export interface ServerConfig { agora_app_id: string; agora_configured: boolean; llm_available: boolean; llm_model: string; demo_mode: boolean; agent_uid: string; }

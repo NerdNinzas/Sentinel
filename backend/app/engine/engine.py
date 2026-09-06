@@ -16,7 +16,9 @@ from app.engine.store import store
 from app.llm import client as llm
 from app.mock import scenario
 from app.mock.monitoring import monitoring
+from app.tools.adapters import jira, slack
 from app.tools import gateway
+from app.tools import github as gh
 
 log = logging.getLogger("sentinel.engine")
 
@@ -40,14 +42,22 @@ class Engine:
         self.prev_metrics: dict[str, float] = {}
         self.agora = AgoraConvoAI()
         self._followup: Optional[asyncio.Task] = None
+        self._slack_task: Optional[asyncio.Task] = None
+        self.slack_incidents: set[str] = set()   # incidents with live Slack participants
+        self.claim_checked: set[str] = set()     # "incident:uid:bucket" claims already verified
 
     # ---- lifecycle ----------------------------------------------------
     async def start(self) -> None:
         monitoring.subscribe(self.on_metrics)
         self._followup = asyncio.create_task(self._followup_loop())
+        if get_settings().slack_bot_token:
+            self._slack_task = asyncio.create_task(self._slack_loop())
+        if get_settings().monitor_url:
+            asyncio.create_task(self._live_monitor_loop())
+            asyncio.create_task(self._loadgen_loop())
 
     async def stop(self) -> None:
-        for t in list(self.scenarios.values()) + list(self.workers.values()) + ([self._followup] if self._followup else []):
+        for t in list(self.scenarios.values()) + list(self.workers.values()) + [x for x in (self._followup, self._slack_task) if x]:
             t.cancel()
 
     def _lock(self, inc_id: str) -> asyncio.Lock:
@@ -61,9 +71,26 @@ class Engine:
             return None
         if uid not in inc.participants and uid != "sentinel":
             store.add_participant(inc, uid, uid.title())
-        # ignore duplicates (Agora may deliver the same final line via RTM and the LLM call)
+        # ignore duplicates (Agora delivers the same utterance via RTM AND the LLM call,
+        # with slightly different punctuation/casing — compare normalized forms)
+        import difflib
+        import re as _re
+        def _norm(t: str) -> str:
+            return _re.sub(r"[^a-z0-9 ]+", "", t.lower()).strip()
+        # acoustic echo: the mic picks up Sentinel's own TTS — drop only CLOSE matches
+        # of a recent, substantial Sentinel line (loose thresholds were eating real speech)
+        for l in inc.transcript[-6:]:
+            if l.uid == "sentinel" and len(l.text) > 20 and (m.now() - l.at).total_seconds() < 25:
+                if difflib.SequenceMatcher(None, _norm(l.text), _norm(text)).ratio() > 0.72:
+                    return None
         for l in inc.transcript[-8:]:
-            if l.uid == uid and l.text.strip().lower() == text.lower() and (m.now() - l.at).total_seconds() < 20:
+            age = (m.now() - l.at).total_seconds()
+            sim = difflib.SequenceMatcher(None, _norm(l.text), _norm(text)).ratio()
+            # anonymous callback copy vs attributed RTM copy of the SAME utterance
+            if age < 15 and sim > 0.55 and ("unknown" in (uid, l.uid)) and uid != l.uid:
+                return l
+            # true double-delivery: same speaker, near-identical, within seconds
+            if age < 8 and l.uid == uid and sim > 0.92:
                 return l
         line = store.add_transcript(inc, uid, text, final=final, turn_id=turn_id)
         if final:
@@ -144,9 +171,9 @@ class Engine:
             ops.append({"op": "add_fact", "text": txt, "confidence": 0.98, "evidence": [{"source": "monitoring", "summary": txt}]})
             notes.append(txt)
             ops.append({"op": "set_status", "status": "recovered"})
-            rolled = any(p.tool == "rollback_deployment" and p.approval == m.ApprovalStatus.APPROVED for p in inc.proposals)
+            rolled = any(p.tool in ("rollback_deployment", "open_revert_pr") and p.approval == m.ApprovalStatus.APPROVED for p in inc.proposals)
             if rolled:
-                ops.append({"op": "add_fact", "text": "Recovery followed the rollback of payment-api v4.2", "confidence": 0.9,
+                ops.append({"op": "add_fact", "text": "Recovery followed the approved rollback/revert", "confidence": 0.9,
                             "evidence": [{"source": "tool", "summary": "rollback executed then success rate recovered"}]})
                 for h in inc.hypotheses:
                     if confidence.CAUSAL.search(h.text) and h.status != m.HypothesisStatus.CONFIRMED:
@@ -214,7 +241,7 @@ class Engine:
             if not lines and not events:
                 return None
             result: dict[str, Any]
-            if llm.available():
+            if llm.available() and lines:      # metrics-only ticks don't need the LLM
                 try:
                     result = await llm_extract(inc, lines, events)
                 except Exception as e:
@@ -224,6 +251,13 @@ class Engine:
                 result = rules.extract(inc, lines)
             await self._apply(inc, result.get("ops", []))
             await self._apply(inc, self._state_rules(inc))
+            await self._apply(inc, self._repo_evidence_rules(inc))
+            if inc.repo or jira.configured:
+                import re as _re
+                claim_re = _re.compile(r"\b(pushed|committed|merged|deployed|raised (a |the )?pr|opened (a |the )?pr|completed .{0,40}(push|deploy|merge)|i('ve| have)? (completed|finished).{0,50}(push|code|backend|fix|test))", _re.I)
+                for line in lines:
+                    if line.uid != "sentinel" and claim_re.search(line.text):
+                        asyncio.create_task(self.verify_claim(inc, line.uid, line.text))
             inc.confidence = confidence.compute(inc)
             store.publish_state(inc)
 
@@ -241,6 +275,11 @@ class Engine:
     async def say(self, inc: m.Incident, text: str, action: str = "SUMMARIZE", urgency: str = "medium") -> None:
         self.last_spoke[inc.id] = time.time()
         store.sentinel_said(inc, text, action)
+        if inc.id in self.slack_incidents:
+            try:
+                await slack.post(inc, f"🤖 {text}")
+            except Exception as e:
+                log.warning("slack echo failed: %s", e)
         if inc.agent_id and self.agora.configured:
             try:
                 await self.agora.speak(inc.agent_id, text, priority="INTERRUPT" if urgency == "high" else "APPEND")
@@ -261,6 +300,158 @@ class Engine:
             except Exception as e:  # keep the loop alive
                 log.exception("followup loop: %s", e)
 
+    # ---- live telemetry from the deployed demo service -----------------------
+    async def _live_monitor_loop(self) -> None:
+        import httpx as _hx
+        url = get_settings().monitor_url.rstrip("/")
+        async with _hx.AsyncClient(timeout=8) as c:
+            while True:
+                await asyncio.sleep(5)
+                try:
+                    if any(not t.done() for t in self.scenarios.values()):
+                        continue   # scripted demo drives the metrics; don't stomp it
+                    h = (await c.get(f"{url}/health")).json()
+                    await monitoring.ingest_live(h)
+                    lg = (await c.get(f"{url}/logs", params={"limit": 3})).json().get("logs", [])
+                    if lg:
+                        for inc in store.incidents.values():
+                            if inc.status != m.IncidentStatus.RESOLVED:
+                                self.events.setdefault(inc.id, []).extend(
+                                    f"service log [{x['level']}] {x['msg']}" for x in lg[-2:])
+                except Exception as e:
+                    log.debug("live monitor: %s", e)
+
+    async def _loadgen_loop(self) -> None:
+        """Keep real traffic flowing at the deployed service so the bug (and the
+        recovery) show up in genuine metrics."""
+        import httpx as _hx
+        url = get_settings().monitor_url.rstrip("/")
+        async with _hx.AsyncClient(timeout=10) as c:
+            while True:
+                live = any(i.status != m.IncidentStatus.RESOLVED for i in store.incidents.values())
+                rps = get_settings().loadgen_rps if live else 0.2
+                try:
+                    await c.post(f"{url}/pay")
+                except Exception:
+                    pass
+                await asyncio.sleep(max(0.2, 1.0 / rps))
+
+    # ---- claim verification: does GitHub agree with what they said? ----------
+    CLAIM_RE = None  # set below
+
+    async def _github_token_for(self, uid: str) -> Optional[str]:
+        """Best token for verification: the claimant's, else any org member's, else env."""
+        from app.core import db
+        if db.available():
+            u = await db.db().users.find_one({"login": uid, "github_token": {"$nin": [None, ""]}})
+            if u:
+                return u["github_token"]
+            u = await db.db().users.find_one({"github_token": {"$nin": [None, ""]}})
+            if u:
+                return u["github_token"]
+        return get_settings().github_token or None
+
+    async def _github_login_for(self, inc: m.Incident, uid: str) -> Optional[str]:
+        from app.core import db
+        first = inc.name_of(uid).split()[0].lower()
+        if db.available():
+            u = await db.db().users.find_one({"login": uid})
+            if u and u.get("github_login"):
+                return u["github_login"]
+            async for u in db.db().users.find({"github_login": {"$nin": [None, ""]}}):
+                if (u.get("name") or "").split()[0].lower() == first:
+                    return u["github_login"]
+        return None
+
+    async def verify_claim(self, inc: m.Incident, uid: str, claim_text: str) -> None:
+        """Someone said work is pushed/deployed/done. Check GitHub and Jira for proof."""
+        if not inc.repo and not jira.configured:
+            return
+        key = f"{inc.id}:{uid}:{int(time.time() // 120)}"
+        if key in self.claim_checked:
+            return
+        self.claim_checked.add(key)
+        name = inc.name_of(uid)
+        # ---- Jira leg: what does the board say about this person's work? ----
+        jira_note = ""
+        if jira.configured:
+            issues = await jira.issues_for(name.split()[0])
+            if issues:
+                head = "; ".join(f"{i['key']} “{i['summary'][:30]}” · {i['status']}" for i in issues[:3])
+                store._timeline(inc, "jira", f"🔎 Checked Jira for {name}: {head}")
+                not_done = [i for i in issues if i["status"].lower() not in ("done", "closed", "resolved")]
+                if not_done:
+                    jira_note = f" On Jira, {not_done[0]['key']} is still {not_done[0]['status']} — should it move?"
+                else:
+                    jira_note = f" Jira agrees: {issues[0]['key']} is {issues[0]['status']}."
+            else:
+                store._timeline(inc, "jira", f"🔎 Checked Jira for {name}: no assigned tickets found")
+            store.publish_state(inc)
+        if not inc.repo:
+            if jira_note:
+                await self.say(inc, f"{name}, noted.{jira_note}", "SUMMARIZE", "medium")
+            return
+        gh_login = await self._github_login_for(inc, uid)
+        token = await self._github_token_for(uid)
+        data = await gh.fetch_changes(inc.repo, inc.started_at, token=token)
+        if (data.get("error") or not data.get("commits")) and token:
+            data = await gh.fetch_changes(inc.repo, inc.started_at, token=None)  # stale token? public repo works bare
+        first = name.split()[0].lower()
+        now_ts = m.now()
+        matches = []
+        for c in data.get("commits", []):
+            if not c.get("at"):
+                continue
+            at = m.datetime.fromisoformat(c["at"].replace("Z", "+00:00"))
+            age_min = (now_ts - at).total_seconds() / 60
+            author = (c.get("author") or "").lower()
+            author_ok = (gh_login and author == gh_login.lower()) or first in author
+            if author_ok and abs(age_min) <= get_settings().github_suspect_minutes:
+                matches.append((c, age_min))
+        if matches:
+            c, age = min(matches, key=lambda x: x[1])
+            txt = f"Verified: {name}'s update matches GitHub — {inc.repo}@{c['sha']} “{c['message'][:60]}” by {c['author']}, {age:.0f} min ago"
+            await self._apply(inc, [{"op": "add_fact", "text": txt, "confidence": 0.95,
+                                     "evidence": [{"source": "deployment", "summary": f"{c['url']}"},
+                                                  {"source": "participant", "summary": f"{name}: {claim_text[:100]}", "by": uid}]}])
+            for a in inc.actions:
+                if a.owner == uid and a.status == m.ActionStatus.DONE and not (a.result or "").startswith("✅"):
+                    a.result = f"✅ verified · {c['sha']} — {(a.result or claim_text)[:80]}"
+            store.publish_state(inc)
+            await self.say(inc, f"Verified — I can see {c['author']}'s commit {c['sha']} on {inc.repo}, {age:.0f} minutes ago. {name}'s update checks out.{jira_note}", "SUMMARIZE", "medium")
+        else:
+            await self._apply(inc, [{"op": "add_risk", "text": f"Unverified claim: {name} reported “{claim_text[:70]}” but no matching commit found on {inc.repo} in the last 90 min", "severity": "medium"}])
+            await self.say(inc, f"{name}, I couldn't verify that on GitHub — I don't see a recent commit from you on {inc.repo}. Is the push on another branch, or still local?{jira_note}", "WARN", "medium")
+
+    # ---- Slack channel ingest (read side of the org Slack integration) ------
+    async def _slack_loop(self) -> None:
+        last_ts = time.time()
+        while True:
+            await asyncio.sleep(4)
+            try:
+                live = [i for i in store.incidents.values() if i.status != m.IncidentStatus.RESOLVED]
+                if not live:
+                    continue
+                inc = max(live, key=lambda i: i.started_at)
+                msgs = await slack.history(last_ts)
+                for msg in msgs:
+                    last_ts = max(last_ts, msg["ts"])
+                    name = await slack.user_name(msg["user"])
+                    uid = "slack-" + name.split()[0].lower()
+                    # reuse an existing participant with the same first name (voice+slack same person)
+                    for p in inc.participants.values():
+                        if p.name.split()[0].lower() == name.split()[0].lower():
+                            uid = p.uid
+                            break
+                    else:
+                        store.add_participant(inc, uid, name, focus="via Slack")
+                    self.slack_incidents.add(inc.id)
+                    line = self.ingest_transcript(inc, uid, msg["text"])
+                    if line is not None:
+                        store._timeline(inc, "slack", f"💬 Slack #{get_settings().slack_channel.lstrip('#')} · {name}: “{msg['text'][:70]}”")
+            except Exception as e:
+                log.warning("slack loop: %s", e)
+
     def _followup_for(self, inc: m.Incident) -> Optional[str]:
         now = m.now()
         for a in inc.actions:
@@ -280,6 +471,63 @@ class Engine:
                 return f"{ic}, {p.tool.replace('_', ' ')} is still waiting for your approval."
         return None
 
+    # ---- linked GitHub repo --------------------------------------------------
+    async def link_repo(self, inc: m.Incident, repo: str, token: str | None = None) -> None:
+        inc.repo = repo
+        data = await gh.fetch_changes(repo, inc.started_at, token=token)
+        inc.repo_changes = data
+        if data.get("error"):
+            store._timeline(inc, "tool", f"🔗 Linked {repo} — {data['error']}")
+            store.publish_state(inc)
+            return
+        commits, prs = data["commits"], data["merged_prs"]
+        head = commits[0] if commits else None
+        note = f"🔗 Linked {repo}@{data['branch']}: {len(commits)} commits, {len(prs)} merged PRs in the last 24h"
+        if head and head.get("minutes_before_incident") is not None:
+            note += f" — latest {head['sha']} “{head['message'][:50]}” ({head['minutes_before_incident']} min before incident)"
+        store._timeline(inc, "tool", note)
+        ops: list[dict] = []
+        if commits or prs:
+            for u in inc.unknowns:
+                if u.status == "open" and "changed" in u.question.lower():
+                    top = [f"{c['sha']} “{c['message'][:40]}” by {c['author']}" for c in commits[:3]]
+                    ops.append({"op": "answer_unknown", "id": u.id, "answer": f"GitHub {repo}: " + "; ".join(top)})
+        suspects = [c for c in commits if c.get("suspect")]
+        if suspects:
+            ops.append({"op": "add_risk", "text": f"{len(suspects)} recent change(s) correlate with the incident ({', '.join(c['sha'] for c in suspects[:3])}) — correlation unverified", "severity": "medium"})
+        if ops:
+            await self._apply(inc, ops)
+        store.publish_state(inc)
+
+    async def link_jira(self, inc: m.Incident) -> None:
+        """Show the room what Sentinel sees on the Jira board right now."""
+        if not jira.configured:
+            return
+        issues = await jira.open_issues()
+        from app.core.config import get_settings as _gs
+        key = _gs().jira_project_key
+        if not issues:
+            store._timeline(inc, "jira", f"🗂 Jira {key}: no open tickets")
+        else:
+            head = "; ".join(f"{i['key']} “{i['summary'][:35]}” ({i['assignee'] or 'unassigned'} · {i['status']})" for i in issues[:3])
+            store._timeline(inc, "jira", f"🗂 Jira {key}: {len(issues)} open — {head}")
+        store.publish_state(inc)
+
+    def _repo_evidence_rules(self, inc: m.Incident) -> list[dict]:
+        """Attach the most suspect recent commit as evidence to causal hypotheses."""
+        ops: list[dict] = []
+        suspects = [c for c in inc.repo_changes.get("commits", []) if c.get("suspect")]
+        if not suspects:
+            return ops
+        c0 = min(suspects, key=lambda c: c.get("minutes_before_incident") or 9e9)
+        summary = f"GitHub {inc.repo}@{c0['sha']} “{c0['message'][:60]}” by {c0['author']}, {c0['minutes_before_incident']} min before incident"
+        for h in inc.hypotheses:
+            if confidence.CAUSAL.search(h.text) and h.status not in (m.HypothesisStatus.REJECTED,):
+                if not any(e.source == "deployment" for e in h.supporting):
+                    ops.append({"op": "update_hypothesis", "id": h.id,
+                                "evidence": {"source": "deployment", "summary": summary, "supports": True}})
+        return ops
+
     # ---- Agora agent --------------------------------------------------------
     def system_prompt(self, inc: m.Incident) -> str:
         from app.llm.prompts import SENTINEL_PERSONA
@@ -289,8 +537,16 @@ class Engine:
         body = self.agora.build_join_body(
             channel=inc.channel, token=token, system_prompt=self.system_prompt(inc),
             greeting=f"Sentinel here. I've joined {inc.title}. I'll track facts, hypotheses, actions and conflicts, and I'll only speak when it helps.",
-            name=f"sentinel-{inc.id.lower()}")
-        res = await self.agora.join(body)
+            name=f"sentinel-{inc.id.lower()}-{int(time.time())}")
+        res = None
+        for attempt in range(3):   # Agora's managed model service occasionally 500s transiently
+            try:
+                res = await self.agora.join(body)
+                break
+            except Exception:
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2 * (attempt + 1))
         inc.agent_id = res.get("agent_id")
         store._timeline(inc, "sentinel", "Sentinel joined the Agora voice room")
         store.publish_state(inc)

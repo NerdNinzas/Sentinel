@@ -32,8 +32,11 @@ TOPICS = {
 }
 ACTION_VERBS = r"(check|look into|look at|investigate|verify|confirm|pull|grab|dig into|review|compare|find out|get)"
 DONE_CUES = ("confirmed", "verified", "just checked", "i checked", "is exhausted", "it's exhausted",
-             "found it", "i can confirm", "checked it", "it is exhausted")
+             "found it", "i can confirm", "checked it", "it is exhausted",
+             "i've completed", "i have completed", "completed the", "i'm done with", "done with the",
+             "pushed it", "i pushed", "i've pushed", "i have pushed", "deployed it", "i deployed", "i merged")
 CRITICAL_TOOLS = {
+    "revert": ("open_revert_pr", lambda t: {}),
     "rollback": ("rollback_deployment", lambda t: {"service": "payment-api", "version": _version(t) or "v4.2"}),
     "roll back": ("rollback_deployment", lambda t: {"service": "payment-api", "version": _version(t) or "v4.2"}),
     "restart": ("restart_service", lambda t: {"service": _service(t)}),
@@ -126,8 +129,10 @@ class RuleExtractor:
             elif any(k in t for k in ("let's", "everyone", "status update", "approved")):
                 ops.append({"op": "set_role", "uid": uid, "role": "incident_commander", "focus": "Coordination"})
 
-        # -- direct question to Sentinel --------------------------------------
-        if "sentinel" in t and ("?" in text or any(k in t for k in ("status", "where are we", "summary", "what do we know"))):
+        # -- direct question to Sentinel (ASR mangles the name: sentinal/santenal/renal…)
+        wake = bool(re.search(r"\bs[ae]n?t[iea]n[ae]?l\b|\bsentinel\b", t))
+        status_q = bool(re.search(r"(what('| i)?s the status|status (update|check|report)|where are we|what do we know|give me (a |the )?(status|summary)|kya (chal|status))", t))
+        if status_q or (wake and ("?" in text or "status" in t or "summary" in t)):
             iv = {"action": "CLARIFY", "speech": "__STATUS__", "urgency": "high"}
 
         # -- customer impact ---------------------------------------------------

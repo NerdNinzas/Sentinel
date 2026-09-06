@@ -176,7 +176,7 @@ class TimelineEvent(BaseModel):
     at: datetime = Field(default_factory=now)
     kind: Literal[
         "incident", "metric", "hypothesis", "fact", "action", "decision",
-        "conflict", "unknown", "risk", "approval", "tool", "sentinel", "participant",
+        "conflict", "unknown", "risk", "approval", "tool", "sentinel", "participant", "slack", "jira",
     ]
     text: str
     ref: Optional[str] = None      # id of the related state item
@@ -250,6 +250,8 @@ class Incident(BaseModel):
     confidence: ConfidenceMatrix = Field(default_factory=ConfidenceMatrix)
 
     metrics: dict[str, float] = Field(default_factory=dict)   # latest monitoring snapshot
+    repo: Optional[str] = None                                 # linked GitHub repo "owner/name"
+    repo_changes: dict = Field(default_factory=dict)           # fetched change window (see tools/github.py)
     agent_id: Optional[str] = None                             # Agora agent id when live
     version: int = 0                                           # bumped on every mutation
 

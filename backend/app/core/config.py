@@ -36,8 +36,22 @@ class Settings(BaseSettings):
     pagerduty_api_key: str = ""
     pagerduty_service_id: str = ""
 
+    github_token: str = ""
+    github_default_repo: str = "NerdNinzas/demo-payment-service"
+    github_suspect_minutes: int = 2880   # a change within this window before the incident is "suspect" (demo-friendly)
+
+    mongodb_url: str = ""
+    auth_required: bool = True
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+    frontend_url: str = "http://localhost:3000"
+    resend_api_key: str = ""
+    resend_from: str = "Sentinel <onboarding@resend.dev>"
+
     database_url: str = "sqlite+aiosqlite:///./sentinel.db"
     demo_mode: bool = True
+    monitor_url: str = ""            # deployed demo service; enables live telemetry + load generator
+    loadgen_rps: float = 2.0
     report_timezone: str = "Asia/Kolkata"
 
 

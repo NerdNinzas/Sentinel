@@ -11,6 +11,7 @@ import { ApprovalModal } from "@/components/ApprovalModal";
 import { VoiceBar } from "@/components/VoiceBar";
 import { SentinelBanner } from "@/components/SentinelBanner";
 import { EvidenceGraph } from "@/components/EvidenceGraph";
+import { RepoPanel } from "@/components/RepoPanel";
 import { Loader2 } from "lucide-react";
 
 export default function IncidentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -25,7 +26,7 @@ export default function IncidentPage({ params }: { params: Promise<{ id: string 
     <div className="flex h-screen flex-col">
       <Header inc={incident} connected={connected} />
       <div className="grid flex-1 grid-cols-[290px_1fr_400px] gap-3 overflow-hidden p-3">
-        <aside className="flex flex-col gap-3 overflow-y-auto pr-0.5"><StatusPanel inc={incident} /><Participants inc={incident} /></aside>
+        <aside className="flex flex-col gap-3 overflow-y-auto pr-0.5"><StatusPanel inc={incident} /><RepoPanel inc={incident} /><Participants inc={incident} /></aside>
         <main className="flex min-w-0 flex-col gap-3 overflow-hidden">
           <SentinelBanner lines={transcript} events={incident.timeline} />
           <div className="min-h-0 flex-1"><Timeline events={incident.timeline} /></div>

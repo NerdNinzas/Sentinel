@@ -13,6 +13,11 @@ async def test_end_to_end_scenario(monkeypatch):
     # The scripted-scenario assertions are written against the deterministic
     # rule extractor; a configured LLM key must not change test behavior.
     monkeypatch.setattr("app.llm.client.available", lambda: False)
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "monitor_url", "")
+    # keep tests offline: no real Slack posts / Jira tickets from the scripted run
+    monkeypatch.setattr(get_settings(), "slack_bot_token", "")
+    monkeypatch.setattr(get_settings(), "jira_api_token", "")
     await engine.start()
     try:
         inc = store.create("Payment API Outage", m.Severity.SEV1, "test-channel")

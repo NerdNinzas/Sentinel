@@ -1,0 +1,14 @@
+import { chromium } from "playwright-core";
+const S = process.env.S;
+const browser = await chromium.launch({ channel: "chrome", headless: true });
+const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+await page.goto("http://localhost:3000", { waitUntil: "networkidle" });
+await page.fill('input[placeholder="YOUR NAME"]', "Arjun");
+await page.click('button:has-text("DECLARE")');
+await page.waitForURL(/\/incident\//, { timeout: 30000 });
+await page.waitForSelector("text=LIVE INCIDENT TIMELINE", { timeout: 30000 });
+await page.click('button:has-text("RUN PAYMENT-OUTAGE DEMO")');
+await page.waitForSelector("text=HUMAN APPROVAL REQUIRED", { timeout: 90000 });
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${S}/noir-warroom2.png` });
+await browser.close();

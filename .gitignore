@@ -1,8 +1,22 @@
+# secrets & env
+**/.env
+.env
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.db
+
+# runtime logs
+.logs/
+
+# node
 node_modules/
 .next/
-__pycache__/
-*.pyc
-.venv/
-backend/.env
-*.db
+out/
+
+# os / editor
 .DS_Store
+*.log

@@ -6,6 +6,6 @@ export const hm = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 
 export const roleLabel = (r: string) => r.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 export const pct = (v: number) => `${Math.round(v * 100)}%`;
 export const initials = (name: string) => name.split(/\s+/).map((s) => s[0]).join("").slice(0, 2).toUpperCase();
-const PALETTE = ["#4f8cff", "#a78bfa", "#22d3ee", "#ffb020", "#f472b6", "#2ee6a6", "#fb923c"];
+const PALETTE = ["#f97316", "#f5b02e", "#e8e8e8", "#4cc9f0", "#b191ff", "#2fd58a", "#ff6b6b"];
 export const avatarColor = (uid: string) => { let h = 0; for (const c of uid) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; };
 export const tone = (v: number) => (v >= 0.8 ? "var(--green)" : v >= 0.5 ? "var(--amber)" : "var(--red)");

@@ -7,7 +7,7 @@ import { useAgoraRoom } from "@/hooks/useAgoraRoom";
 import { cn } from "@/lib/utils";
 
 export function VoiceBar({ inc }: { inc: Incident }) {
-  const { status, error, muted, join, leave, toggleMute } = useAgoraRoom(inc.id);
+  const { status, error, muted, join, leave, toggleMute, agentAudio, unblockAudio } = useAgoraRoom(inc.id);
   const [cfg, setCfg] = useState<ServerConfig | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [demoSpeed, setDemoSpeed] = useState(1);
@@ -29,6 +29,9 @@ export function VoiceBar({ inc }: { inc: Incident }) {
           <button onClick={leave} className="btn"><PhoneOff />Leave</button>
         </>
       )}
+      {status === "live" && agentAudio === "playing" && <span className="chip chip-green"><span className="wave flex h-3 items-end"><span /><span /><span /><span /></span>AGENT AUDIO LIVE</span>}
+      {status === "live" && agentAudio === "none" && <span className="chip chip-amber">NO AGENT AUDIO YET</span>}
+      {agentAudio === "blocked" && <button onClick={unblockAudio} className="btn btn-sm btn-primary pulse">🔊 CLICK TO ENABLE AUDIO</button>}
       {error && <span className="flex items-center gap-1 text-xs text-[var(--red)]"><AlertCircle className="h-3.5 w-3.5" />{error}</span>}
       <div className="mx-1 h-6 w-px bg-[var(--border)]" />
       {inc.agent_id ? (

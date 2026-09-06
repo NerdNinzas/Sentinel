@@ -11,6 +11,7 @@ import asyncio
 import logging
 from typing import Any, Callable, Optional
 
+from app.core import db as _db
 from app.engine import models as m
 
 log = logging.getLogger("sentinel.store")
@@ -57,6 +58,10 @@ class IncidentStore:
 
     def publish_state(self, inc: m.Incident) -> None:
         inc.version += 1
+        try:
+            _db.mark_dirty(inc.id)
+        except Exception:
+            pass
         self.broadcast(inc.id, {"type": "state", "incident": inc.model_dump(mode="json")})
 
     # ---- mutations ---------------------------------------------------
